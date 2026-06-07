@@ -101,16 +101,27 @@ jobs:
           echo "STAGE_DIR=$STAGE" >> "$GITHUB_ENV"
 
       - name: Forbidden-paths check
+        # Recursive: a forbidden_paths entry matches ANY file or directory
+        # anywhere in the snapshot tree whose name component contains the
+        # forbidden token. This is stricter than checking only the snapshot
+        # root, and catches fixtures with internal codenames buried deep in
+        # included directories.
         run: |
           set -euo pipefail
           MANIFEST=internal/.publish/manifest.yaml
           mapfile -t FORBIDDEN_PATHS < <(yq -r '.forbidden_paths[]?' "$MANIFEST")
+          fail=0
           for fp in "${FORBIDDEN_PATHS[@]}"; do
-            if [ -e "$STAGE_DIR/$fp" ]; then
-              echo "::error::Forbidden path leaked into snapshot: $fp"
-              exit 1
+            # `-name` matches the basename; wrap with * so partial-name
+            # tokens like 'v-xxl-cx' also catch 'v-xxl-cx.json'.
+            matches=$(find "$STAGE_DIR" -name "*${fp}*" -print)
+            if [ -n "$matches" ]; then
+              echo "::error::Forbidden path token '$fp' matches in snapshot:"
+              echo "$matches" | sed 's|^|::error::  |'
+              fail=1
             fi
           done
+          [ "$fail" -eq 0 ]
 
       - name: Gitleaks scan stage
         run: |
