@@ -179,7 +179,6 @@ jobs:
 
       - name: Commit and push
         if: ${{ !inputs.dry_run }}
-        id: commit
         working-directory: public
         env:
           MSG: ${{ inputs.release_message }}
@@ -190,30 +189,40 @@ jobs:
           git config user.email "garuda-publisher@users.noreply.github.com"
           git add -A
           if git diff --cached --quiet; then
-            echo "No changes to publish."
-            echo "published=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "No changes to publish; will still tag existing HEAD."
+          else
+            git commit -m "${MSG}" -m "Source: garuda-internal@${INTERNAL_SHA}"
+            git push origin "HEAD:${PUBLIC_BRANCH}"
           fi
-          git commit -m "${MSG}" -m "Source: garuda-internal@${INTERNAL_SHA}"
-          git push origin "HEAD:${PUBLIC_BRANCH}"
-          echo "published=true" >> "$GITHUB_OUTPUT"
 
+      # Tag both repos unconditionally on non-dry-run runs. The tag marks
+      # "this state was published at this calendar time" — even if the
+      # snapshot was byte-identical to the previous publish, the act of
+      # running publish is the release event.
       - name: Tag internal repo
-        if: ${{ !inputs.dry_run && steps.commit.outputs.published == 'true' }}
+        if: ${{ !inputs.dry_run }}
         working-directory: internal
         env:
           TAG: ${{ steps.calver.outputs.tag }}
         run: |
           set -euo pipefail
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "Tag ${TAG} already exists locally; skipping."
+            exit 0
+          fi
           git tag "${TAG}"
           git push origin "${TAG}"
 
       - name: Tag public repo
-        if: ${{ !inputs.dry_run && steps.commit.outputs.published == 'true' }}
+        if: ${{ !inputs.dry_run }}
         working-directory: public
         env:
           TAG: ${{ steps.calver.outputs.tag }}
         run: |
           set -euo pipefail
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "Tag ${TAG} already exists locally; skipping."
+            exit 0
+          fi
           git tag "${TAG}"
           git push origin "${TAG}"
