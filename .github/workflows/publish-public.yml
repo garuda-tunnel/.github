@@ -162,8 +162,18 @@ jobs:
           git add -A
           git diff --cached --stat || true
 
+      - name: Generate calver tag
+        id: calver
+        run: |
+          set -euo pipefail
+          # Format: YY.1MMDD.1HHMM  e.g. 26.10405.11013
+          TAG=$(date -u +'%y.1%m%d.1%H%M')
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Calver tag: ${TAG}"
+
       - name: Commit and push
         if: ${{ !inputs.dry_run }}
+        id: commit
         working-directory: public
         env:
           MSG: ${{ inputs.release_message }}
@@ -175,7 +185,29 @@ jobs:
           git add -A
           if git diff --cached --quiet; then
             echo "No changes to publish."
+            echo "published=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git commit -m "${MSG}" -m "Source: garuda-internal@${INTERNAL_SHA}"
           git push origin "HEAD:${PUBLIC_BRANCH}"
+          echo "published=true" >> "$GITHUB_OUTPUT"
+
+      - name: Tag internal repo
+        if: ${{ !inputs.dry_run && steps.commit.outputs.published == 'true' }}
+        working-directory: internal
+        env:
+          TAG: ${{ steps.calver.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git tag "${TAG}"
+          git push origin "${TAG}"
+
+      - name: Tag public repo
+        if: ${{ !inputs.dry_run && steps.commit.outputs.published == 'true' }}
+        working-directory: public
+        env:
+          TAG: ${{ steps.calver.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git tag "${TAG}"
+          git push origin "${TAG}"
