@@ -42,6 +42,12 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # `contents: write` is required so the workflow can push a CalVer tag back
+    # into the internal (caller) repository using the runner GITHUB_TOKEN.
+    # Callers MUST grant `contents: write` (default repo workflow permissions
+    # are read-only) or the tag-internal step will fail with HTTP 403.
+    permissions:
+      contents: write
     env:
       PUBLIC_REPO: ${{ inputs.public_repo }}
       PUBLIC_BRANCH: ${{ inputs.public_branch }}
