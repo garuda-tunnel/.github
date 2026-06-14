@@ -1,0 +1,23 @@
+name: release-please (reusable)
+on:
+  workflow_call:
+    inputs:
+      config-file:
+        description: "Path to release-please config"
+        type: string
+        default: release-please-config.json
+      manifest-file:
+        description: "Path to release-please manifest"
+        type: string
+        default: .release-please-manifest.json
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          config-file: ${{ inputs.config-file }}
+          manifest-file: ${{ inputs.manifest-file }}
