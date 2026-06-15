@@ -1,17 +1,18 @@
 name: Publish component image and chart
 
-# Reusable workflow: build and push a Docker image to GHCR, and optionally
-# package and push a Helm chart to an OCI registry.
+concurrency:
+  group: publish-${{ inputs.image_name }}-${{ inputs.image_tag || github.sha }}
+  cancel-in-progress: false
+
+# Reusable workflow: build+push a Docker image to GHCR and (optionally) package+push
+# a Helm chart to an OCI registry. Sub-project A model:
+#   - The chart pins the image by TAG = the release semver (passed as image_tag), OR by
+#     DIGEST resolved at package time when pin_mode=digest.
+#   - NO git commit-back. NO :latest. Dev builds (pin_mode=dev) push only sha-<shortsha>.
 #
-# On push to main: build+push image, then pin the image digest into the chart
-#   (values.yaml via chart_values_file/image_values_key, OR a library template
-#   via image_template_file) and commit it back to main with [skip ci].
-# On v* tag: build+push image AND publish the chart to OCI (the chart already
-#   carries the digest pinned by the preceding main push).
-#
-# Required caller permissions:
-#   contents: write    (needed for the digest commit-back; caller-capped)
-#   packages: write
+# Required caller permissions: contents: read, packages: write
+# (release publishing is gated by the caller on release-please outputs; this workflow
+#  itself does not write to git.)
 
 on:
   workflow_call:
@@ -24,8 +25,18 @@ on:
         description: "Docker build context path relative to repo root"
         type: string
         required: true
+      image_tag:
+        description: "Release semver WITHOUT leading v (e.g. 0.2.0). Empty in dev mode."
+        type: string
+        required: false
+        default: ''
+      pin_mode:
+        description: "tag | digest | dev. tag/digest=release publish; dev=image-only sha- build."
+        type: string
+        required: false
+        default: 'tag'
       chart_path:
-        description: "Path to Helm chart directory; empty string disables chart publishing"
+        description: "Helm chart dir (repo-root-relative); empty disables chart publishing"
         type: string
         required: false
         default: ''
@@ -34,33 +45,29 @@ on:
         type: string
         required: false
         default: 'oci://ghcr.io/garuda-tunnel/charts'
-      chart_values_file:
-        description: "Chart values.yaml (repo-root-relative) to pin the digest into; empty disables values-file pinning"
+      chart_image_values_key:
+        description: "yq dotted path in <chart>/values.yaml to set to the digest when pin_mode=digest (e.g. images.wireguard); empty disables digest injection"
         type: string
         required: false
         default: ''
-      image_values_key:
-        description: "yq dotted path in chart_values_file to set (e.g. images.wireguard)"
-        type: string
-        required: false
-        default: ''
-      image_template_file:
-        description: "Library Go-template file (repo-root-relative) whose marker line is rewritten via sed; empty disables template pinning"
+      expected_chart_version:
+        description: "When set, assert the chart's Chart.yaml version equals this string (callers pass the release semver)"
         type: string
         required: false
         default: ''
 
 jobs:
-  build-and-push-image:
+  build-image:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.ref_name }}
-          persist-credentials: true
+          ref: ${{ github.sha }}
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
@@ -72,10 +79,9 @@ jobs:
         with:
           images: ${{ inputs.image_name }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,prefix=sha-
-            type=semver,pattern=v{{version}}
-            type=semver,pattern={{version}}
+            type=raw,value=${{ inputs.image_tag }},enable=${{ inputs.pin_mode != 'dev' && inputs.image_tag != '' }}
+            type=raw,value=v${{ inputs.image_tag }},enable=${{ inputs.pin_mode != 'dev' && inputs.image_tag != '' }}
+            type=sha,prefix=sha-,enable=${{ inputs.pin_mode == 'dev' }}
       - id: build
         uses: docker/build-push-action@v7
         with:
@@ -84,75 +90,60 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
-      - name: Install yq
-        if: ${{ github.ref == 'refs/heads/main' && (inputs.chart_values_file != '' || inputs.image_template_file != '') }}
-        uses: mikefarah/yq@v4
-        with:
-          cmd: yq --version
-      - name: Pin image digest into chart values
-        if: ${{ github.ref == 'refs/heads/main' && inputs.chart_values_file != '' }}
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-          IMAGE_NAME: ${{ inputs.image_name }}
-          VALUES_KEY: ${{ inputs.image_values_key }}
-          VALUES_FILE: ${{ inputs.chart_values_file }}
-        run: |
-          set -euo pipefail
-          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "bad digest: $DIGEST" >&2; exit 1; }
-          [[ -n "$VALUES_KEY" ]] || { echo "image_values_key is empty" >&2; exit 1; }
-          [[ "$VALUES_KEY" =~ ^[A-Za-z0-9_.-]+$ ]] || { echo "unsafe key: $VALUES_KEY" >&2; exit 1; }
-          yq -e "(.${VALUES_KEY}) | tag" "$VALUES_FILE" >/dev/null 2>&1 || { echo "key ${VALUES_KEY} does not exist in ${VALUES_FILE}" >&2; exit 1; }
-          IMAGE_REF="${IMAGE_NAME}@${DIGEST}" \
-            yq -i "(.${VALUES_KEY}) = strenv(IMAGE_REF)" "$VALUES_FILE"
-          if ! git diff --quiet -- "$VALUES_FILE"; then
-            git config user.name  "garuda-release-bot"
-            git config user.email "garuda-release-bot@users.noreply.github.com"
-            git add "$VALUES_FILE"
-            git commit -m "chore(images): pin ${IMAGE_NAME}@${DIGEST} [skip ci]"
-            git push origin "HEAD:${GITHUB_REF_NAME}" || {
-              git pull --rebase origin "$GITHUB_REF_NAME"
-              git push origin "HEAD:${GITHUB_REF_NAME}"
-            }
-          fi
-      - name: Pin image digest into library template
-        if: ${{ github.ref == 'refs/heads/main' && inputs.image_template_file != '' }}
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-          IMAGE_NAME: ${{ inputs.image_name }}
-          TPL: ${{ inputs.image_template_file }}
-        run: |
-          set -euo pipefail
-          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "bad digest: $DIGEST" >&2; exit 1; }
-          n=$(grep -cE "ghcr\.io/garuda-tunnel/garuda-frr-sidecar@sha256:[0-9a-f]{64}.*frr-image-pin" "$TPL")
-          [[ "$n" -eq 1 ]] || { echo "expected exactly 1 frr-image-pin marker line in $TPL, got $n" >&2; exit 1; }
-          sed -i -E "/frr-image-pin/ s|ghcr\.io/garuda-tunnel/garuda-frr-sidecar@sha256:[0-9a-f]{64}|${IMAGE_NAME}@${DIGEST}|" "$TPL"
-          grep -q "@${DIGEST}" "$TPL" || { echo "rewrite did not land in $TPL" >&2; exit 1; }
-          if ! git diff --quiet -- "$TPL"; then
-            git config user.name  "garuda-release-bot"
-            git config user.email "garuda-release-bot@users.noreply.github.com"
-            git add "$TPL"
-            git commit -m "chore(images): pin ${IMAGE_NAME}@${DIGEST} [skip ci]"
-            git push origin "HEAD:${GITHUB_REF_NAME}" || {
-              git pull --rebase origin "$GITHUB_REF_NAME"
-              git push origin "HEAD:${GITHUB_REF_NAME}"
-            }
-          fi
 
   publish-chart:
-    if: ${{ inputs.chart_path != '' && startsWith(github.ref, 'refs/tags/v') }}
+    if: ${{ inputs.chart_path != '' && inputs.pin_mode != 'dev' }}
+    needs: [build-image]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v6
-      - uses: azure/setup-helm@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: azure/setup-helm@v5
         with:
           version: 'v3.16.0'
+      - name: Install yq
+        run: |
+          set -euo pipefail
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+      - name: Assert chart version matches release tag
+        if: ${{ inputs.expected_chart_version != '' }}
+        env:
+          EXPECTED: ${{ inputs.expected_chart_version }}
+          CHART_PATH: ${{ inputs.chart_path }}
+        run: |
+          set -euo pipefail
+          ACTUAL=$(yq -r '.version' "${CHART_PATH}/Chart.yaml")
+          [[ "$ACTUAL" == "$EXPECTED" ]] || { echo "chart version $ACTUAL != release tag $EXPECTED" >&2; exit 1; }
+      - name: Pin image digest into staged values (digest mode only)
+        if: ${{ inputs.pin_mode == 'digest' && inputs.chart_image_values_key != '' }}
+        env:
+          DIGEST: ${{ needs.build-image.outputs.digest }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+          VALUES_KEY: ${{ inputs.chart_image_values_key }}
+          CHART_PATH: ${{ inputs.chart_path }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "bad digest: $DIGEST" >&2; exit 1; }
+          [[ "$VALUES_KEY" =~ ^[A-Za-z0-9_.-]+$ ]] || { echo "unsafe key: $VALUES_KEY" >&2; exit 1; }
+          # Edit ONLY the staged working copy (fed to helm package); never committed to git.
+          IMAGE_REF="${IMAGE_NAME}@${DIGEST}" \
+            yq -i "(.${VALUES_KEY}) = strenv(IMAGE_REF)" "${CHART_PATH}/values.yaml"
       - name: Helm registry login
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io \
             -u ${{ github.actor }} --password-stdin
       - name: Package and push chart
+        env:
+          CHART_PATH: ${{ inputs.chart_path }}
+          CHART_REGISTRY: ${{ inputs.chart_registry }}
         run: |
           set -euo pipefail
-          helm dependency update ${{ inputs.chart_path }}
-          helm package ${{ inputs.chart_path }} --destination /tmp/chart
-          helm push /tmp/chart/*.tgz ${{ inputs.chart_registry }}
+          helm dependency update "$CHART_PATH"
+          PKG=$(helm package "$CHART_PATH" --destination /tmp/chart | awk '{print $NF}')
+          helm push "$PKG" "$CHART_REGISTRY"
