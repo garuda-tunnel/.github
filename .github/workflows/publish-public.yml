@@ -1,5 +1,9 @@
 name: Publish snapshot to public repo
 
+concurrency:
+  group: public-mirror-${{ github.repository }}
+  cancel-in-progress: false
+
 # Reusable workflow: build a filtered snapshot of a private repo and push it
 # as a single commit to a public target repo.
 #
@@ -42,12 +46,8 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # `contents: write` is required so the workflow can push a CalVer tag back
-    # into the internal (caller) repository using the runner GITHUB_TOKEN.
-    # Callers MUST grant `contents: write` (default repo workflow permissions
-    # are read-only) or the tag-internal step will fail with HTTP 403.
     permissions:
-      contents: write
+      contents: read
     env:
       PUBLIC_REPO: ${{ inputs.public_repo }}
       PUBLIC_BRANCH: ${{ inputs.public_branch }}
@@ -106,6 +106,14 @@ jobs:
           git -C internal archive HEAD -- "${INCLUDES[@]}" | tar -x -C "$STAGE"
           echo "STAGE_DIR=$STAGE" >> "$GITHUB_ENV"
 
+      - name: Enforce no .github in stage
+        run: |
+          set -euo pipefail
+          if [ -e "$STAGE_DIR/.github" ]; then
+            echo "::error::Stage contains .github — the public mirror must not deliver workflows." >&2
+            exit 1
+          fi
+
       - name: Forbidden-paths check
         # Top-level guard: each forbidden_paths entry is checked as a path
         # relative to the snapshot root. This is intentional — entries are
@@ -139,43 +147,16 @@ jobs:
           set -euo pipefail
           find public -mindepth 1 -maxdepth 1 \
             ! -name '.git' ! -name '.github' -exec rm -rf {} +
+          # Pure mirror: the public repo runs no workflows. Wipe any previously
+          # delivered workflows so they do not linger (rm above preserves .github).
+          rm -rf public/.github/workflows
           rsync -a "$STAGE_DIR"/ public/
-
-      - name: Gitleaks scan public workflows
-        run: |
-          set -euo pipefail
-          if [ -d internal/.publish/public-workflows ]; then
-            gitleaks dir \
-              --no-banner \
-              --config internal/.publish/gitleaks.toml \
-              --report-format json \
-              --report-path /tmp/gitleaks-public-workflows-report.json \
-              --exit-code 1 \
-              internal/.publish/public-workflows
-          fi
-
-      - name: Sync public workflows
-        run: |
-          set -euo pipefail
-          mkdir -p public/.github/workflows
-          if compgen -G "internal/.publish/public-workflows/*.yml" > /dev/null; then
-            cp internal/.publish/public-workflows/*.yml public/.github/workflows/
-          fi
 
       - name: Diff summary
         working-directory: public
         run: |
           git add -A
           git diff --cached --stat || true
-
-      - name: Generate calver tag
-        id: calver
-        run: |
-          set -euo pipefail
-          # Format: YY.1MMDD.1HHMM  e.g. 26.10405.11013
-          TAG=$(date -u +'%y.1%m%d.1%H%M')
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "Calver tag: ${TAG}"
 
       - name: Commit and push
         if: ${{ !inputs.dry_run }}
@@ -189,40 +170,9 @@ jobs:
           git config user.email "garuda-publisher@users.noreply.github.com"
           git add -A
           if git diff --cached --quiet; then
-            echo "No changes to publish; will still tag existing HEAD."
+            echo "No changes to publish; skipping commit."
           else
             git commit -m "${MSG}" -m "Source: garuda-internal@${INTERNAL_SHA}"
             git push origin "HEAD:${PUBLIC_BRANCH}"
           fi
 
-      # Tag both repos unconditionally on non-dry-run runs. The tag marks
-      # "this state was published at this calendar time" — even if the
-      # snapshot was byte-identical to the previous publish, the act of
-      # running publish is the release event.
-      - name: Tag internal repo
-        if: ${{ !inputs.dry_run }}
-        working-directory: internal
-        env:
-          TAG: ${{ steps.calver.outputs.tag }}
-        run: |
-          set -euo pipefail
-          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
-            echo "Tag ${TAG} already exists locally; skipping."
-            exit 0
-          fi
-          git tag "${TAG}"
-          git push origin "${TAG}"
-
-      - name: Tag public repo
-        if: ${{ !inputs.dry_run }}
-        working-directory: public
-        env:
-          TAG: ${{ steps.calver.outputs.tag }}
-        run: |
-          set -euo pipefail
-          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
-            echo "Tag ${TAG} already exists locally; skipping."
-            exit 0
-          fi
-          git tag "${TAG}"
-          git push origin "${TAG}"
