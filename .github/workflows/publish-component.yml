@@ -55,9 +55,15 @@ on:
         type: string
         required: false
         default: ''
+      skip_image:
+        description: "When true, skip the image build job and only publish the chart (used by multi-image components where another job already pushed the image)"
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   build-image:
+    if: ${{ !inputs.skip_image }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -92,8 +98,8 @@ jobs:
           provenance: false
 
   publish-chart:
-    if: ${{ inputs.chart_path != '' && inputs.pin_mode != 'dev' }}
     needs: [build-image]
+    if: ${{ always() && inputs.chart_path != '' && inputs.pin_mode != 'dev' && (needs.build-image.result == 'success' || needs.build-image.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
