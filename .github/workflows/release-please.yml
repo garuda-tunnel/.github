@@ -10,14 +10,29 @@ on:
         description: "Path to release-please manifest"
         type: string
         default: .release-please-manifest.json
+    outputs:
+      paths_released:
+        description: "JSON array of package paths that had a release created"
+        value: ${{ jobs.release-please.outputs.paths_released }}
+      raw:
+        description: "Full release-please step outputs as JSON (root keys + path-prefixed keys like '<path>--version')"
+        value: ${{ jobs.release-please.outputs.raw }}
+concurrency:
+  group: release-please-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   release-please:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      issues: write
       pull-requests: write
+    outputs:
+      paths_released: ${{ steps.release.outputs.paths_released }}
+      raw: ${{ toJSON(steps.release.outputs) }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - id: release
+        uses: googleapis/release-please-action@v4
         with:
           config-file: ${{ inputs.config-file }}
           manifest-file: ${{ inputs.manifest-file }}
