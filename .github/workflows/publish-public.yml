@@ -39,6 +39,11 @@ on:
         type: string
         required: false
         default: '8.27.2'
+      release_tag:
+        description: "Semver tag to mirror to the public repo (e.g. v0.4.0 or 0.4.0). Empty => no tag pushed (dev/manual mirror)."
+        type: string
+        required: false
+        default: ''
     secrets:
       PUBLISH_PAT:
         required: true
@@ -175,4 +180,30 @@ jobs:
             git commit -m "${MSG}" -m "Source: garuda-internal@${INTERNAL_SHA}"
             git push origin "HEAD:${PUBLIC_BRANCH}"
           fi
+
+      - name: Push release tag to public mirror
+        if: ${{ !inputs.dry_run && inputs.release_tag != '' }}
+        working-directory: public
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          TAG="v${RELEASE_TAG#v}"
+          # X.Y.Z only by design: release-please emits clean semver for these
+          # packages; pre-release/build tags are not part of the public mirror policy.
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::release_tag '${RELEASE_TAG}' is not semver (expected vX.Y.Z or X.Y.Z)" >&2
+            exit 1
+          fi
+          # Immutable: skip if the tag already exists on the public remote.
+          # Avoid a pipe (pipefail + grep -q early-exit can invert the status).
+          if [ -n "$(git ls-remote --tags origin "refs/tags/${TAG}")" ]; then
+            echo "Tag ${TAG} already exists on ${PUBLIC_REPO}; skipping (immutable)."
+            exit 0
+          fi
+          git config user.name  "garuda-publisher[bot]"
+          git config user.email "garuda-publisher@users.noreply.github.com"
+          git tag "${TAG}"
+          git push origin "refs/tags/${TAG}"
+          echo "Pushed ${TAG} to ${PUBLIC_REPO}."
 
