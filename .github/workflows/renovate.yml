@@ -32,6 +32,8 @@ jobs:
           LOG_LEVEL: ${{ github.event.inputs.logLevel || 'info' }}
           RENOVATE_PLATFORM: 'github'
           RENOVATE_INHERIT_CONFIG: 'true'
+          RENOVATE_INHERIT_CONFIG_REPO_NAME: 'garuda-tunnel/.github'
+          RENOVATE_INHERIT_CONFIG_FILE_NAME: 'renovate.json'
           RENOVATE_AUTODISCOVER: 'true'
           RENOVATE_AUTODISCOVER_FILTER: 'garuda-tunnel/*-internal'
           RENOVATE_ONBOARDING: 'false'
