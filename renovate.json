@@ -20,5 +20,16 @@
       "matchUpdateTypes": ["major"],
       "dependencyDashboardApproval": true
     }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Inline-annotation manager for OCI Helm chart_version and image pins that standard managers do not detect. Driven by '# renovate: datasource=... depName=... [versioning=...]' comments.",
+      "managerFilePatterns": ["/(^|/)main\\.tf$/", "/(^|/)values\\.ya?ml$/"],
+      "matchStrings": [
+        "#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)(?:\\s+versioning=(?<versioning>\\S+))?[^\\n]*\\n[^\\n]*?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}"
+    }
   ]
 }
