@@ -1,0 +1,24 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits"
+  ],
+  "timezone": "Europe/Moscow",
+  "schedule": ["* 0-6 * * 1-5"],
+  "terraform": { "enabled": true },
+  "helm-values": { "enabled": true },
+  "packageRules": [
+    {
+      "description": "Automerge patch-level updates",
+      "matchUpdateTypes": ["patch"],
+      "automerge": true
+    },
+    {
+      "description": "Major updates require explicit approval via the dashboard",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    }
+  ]
+}
