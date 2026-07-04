@@ -6,36 +6,72 @@
     ":semanticCommits"
   ],
   "timezone": "Europe/Moscow",
-  "schedule": ["* 0-6 * * 1-5"],
-  "terraform": { "enabled": true },
-  "helm-values": { "enabled": true },
+  "schedule": [
+    "* 0-6 * * 1-5"
+  ],
+  "terraform": {
+    "enabled": true
+  },
+  "helm-values": {
+    "enabled": true
+  },
   "packageRules": [
     {
-      "description": ["Automerge patch-level updates"],
-      "matchUpdateTypes": ["patch"],
+      "description": [
+        "Automerge patch-level updates"
+      ],
+      "matchUpdateTypes": [
+        "patch"
+      ],
       "automerge": true
     },
     {
-      "description": ["Major updates require explicit approval via the dashboard"],
-      "matchUpdateTypes": ["major"],
+      "description": [
+        "Major updates require explicit approval via the dashboard"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
       "dependencyDashboardApproval": true
     },
     {
-      "description": ["Suppress CalVer/CI snapshot tags (e.g. 26.10615.x) on garuda component repos; only vX.Y.Z release-please tags are real releases"],
-      "matchDatasources": ["git-tags", "github-tags"],
-      "matchPackageNames": ["/garuda-tunnel/"],
+      "description": [
+        "Suppress CalVer/CI snapshot tags (e.g. 26.10615.x) on garuda component repos; only vX.Y.Z release-please tags are real releases"
+      ],
+      "matchDatasources": [
+        "git-tags",
+        "github-tags"
+      ],
+      "matchPackageNames": [
+        "/garuda-tunnel/"
+      ],
       "allowedVersions": "< 20.0.0"
     }
   ],
   "customManagers": [
     {
       "customType": "regex",
-      "description": ["Inline-annotation manager for OCI Helm chart_version and image pins that standard managers do not detect. Driven by '# renovate: datasource=... depName=... [versioning=...]' comments."],
-      "managerFilePatterns": ["/(^|/)main\\.tf$/", "/(^|/)values\\.ya?ml$/"],
+      "description": [
+        "Inline-annotation manager for OCI Helm chart_version and image pins that standard managers do not detect. Driven by '# renovate: datasource=... depName=... [versioning=...]' comments."
+      ],
+      "managerFilePatterns": [
+        "/(^|/)main\\.tf$/",
+        "/(^|/)values\\.ya?ml$/"
+      ],
       "matchStrings": [
         "#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)(?:\\s+versioning=(?<versioning>\\S+))?[^\\n]*\\n[^\\n]*?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
       ],
       "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}"
     }
+  ],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/vendor/**",
+    "**/.terraform/**",
+    "**/__tests__/**",
+    "**/test/**",
+    "**/tests/**",
+    "**/__fixtures__/**",
+    "legacy/**"
   ]
 }
