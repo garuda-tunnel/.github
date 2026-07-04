@@ -19,6 +19,12 @@
       "description": "Major updates require explicit approval via the dashboard",
       "matchUpdateTypes": ["major"],
       "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Suppress CalVer/CI snapshot tags (e.g. 26.10615.x) on garuda component repos; only vX.Y.Z release-please tags are real releases",
+      "matchDatasources": ["git-tags", "github-tags"],
+      "matchPackageNames": ["/garuda-tunnel/"],
+      "allowedVersions": "< 20.0.0"
     }
   ],
   "customManagers": [
