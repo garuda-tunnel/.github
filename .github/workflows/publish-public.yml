@@ -177,7 +177,8 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes to publish; skipping commit."
           else
-            git commit -m "${MSG}" -m "Source: garuda-internal@${INTERNAL_SHA}"
+            # GITHUB_REPOSITORY is the calling internal repo in a reusable workflow.
+            git commit -m "${MSG}" -m "Source: ${GITHUB_REPOSITORY#*/}@${INTERNAL_SHA}"
             git push origin "HEAD:${PUBLIC_BRANCH}"
           fi
 
