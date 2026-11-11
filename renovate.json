@@ -62,6 +62,20 @@
         "#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)(?:\\s+versioning=(?<versioning>\\S+))?[^\\n]*\\n[^\\n]*?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
       ],
       "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}"
+    },
+    {
+      "customType": "regex",
+      "description": [
+        "Inline-annotation manager for CNPG-style digest-pinned Terraform image values. versioning= must be whitespace-free because annotations capture it with \\S+."
+      ],
+      "managerFilePatterns": [
+        "/(^|/)main\\.tf$/"
+      ],
+      "matchStrings": [
+        "#\\s*renovate:\\s*datasource=docker\\s+depName=(?<depName>\\S+)(?:\\s+versioning=(?<versioning>\\S+))?[^\\n]*\\n(?<indentation>\\s*)image\\s*=\\s*\\\"[^\\\"\\n]*?:(?<currentValue>[0-9]+\\.[0-9]+-[0-9]{12}-[^@\\\"\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})\\\""
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}"
     }
   ],
   "ignorePaths": [

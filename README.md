@@ -2,6 +2,12 @@
 
 Shared reusable GitHub Actions workflows for the `garuda-tunnel` org.
 
+## Renovate annotations
+
+For CNPG-style Terraform `image = "<image>:<tag>@<digest>"` pins, use `# renovate: datasource=docker depName=<image> versioning=<versioning>` on the preceding line. The optional `versioning` value must contain no whitespace because the shared regex manager captures it as one token.
+
+CNPG example: `# renovate: datasource=docker depName=ghcr.io/cloudnative-pg/postgresql versioning=regex:^(?<major>\d+)\.(?<minor>\d+)-(?<patch>\d{12})-(?<compatibility>[^-]+-[^-]+)$`
+
 ## Workflows
 
 ### `publish-component.yml`
